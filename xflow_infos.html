@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Wanchain XFlows 资产路径全景图</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .chain-icon-mini { width: 14px; height: 14px; border-radius: 50%; display: inline-block; vertical-align: middle; margin-right: 6px; object-fit: contain; }
+        /* 资产列：横向并排 */
+        .asset-column { @apply bg-white rounded-xl border border-gray-100 shadow-sm flex flex-col overflow-hidden; min-height: 300px; }
+        /* 链列表容器：纵向排列 */
+        .chain-list { @apply flex flex-col gap-1 p-3 overflow-y-auto; max-height: 450px; }
+        .chain-item { @apply flex items-center px-2 py-1.5 rounded-md hover:bg-gray-50 transition-colors text-[11px] text-gray-600 border border-transparent hover:border-gray-100; }
+        .filter-select { @apply block w-full px-2 py-1.5 text-xs border-gray-200 rounded-md bg-white border outline-none focus:ring-1 focus:ring-blue-400; }
+    </style>
+</head>
+<body class="bg-gray-50 p-4 md:p-8 text-gray-800 antialiased font-sans">
+
+    <div class="max-w-7xl mx-auto">
+        
+        <section class="mb-10">
+            <div class="flex justify-between items-end mb-6">
+                <div>
+                    <h1 class="text-2xl font-black text-gray-900 tracking-tight">Wanchain XFlows 资产分布全景</h1>
+                    <p class="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">横向资产矩阵 · 纵向支持列表</p>
+                </div>
+                <div id="status" class="text-[10px] font-mono bg-green-50 text-green-600 px-3 py-1 rounded-full border border-green-100 font-bold">LOADING DATA...</div>
+            </div>
+            
+            <div id="summaryHub" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                </div>
+        </section>
+
+        <div class="grid grid-cols-3 gap-4 mb-6 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+            <div>
+                <label class="block text-[9px] font-bold text-gray-400 mb-1 uppercase">Asset</label>
+                <select id="assetFilter" class="filter-select"><option value="">全部资产</option></select>
+            </div>
+            <div>
+                <label class="block text-[9px] font-bold text-gray-400 mb-1 uppercase">From</label>
+                <select id="fromFilter" class="filter-select"><option value="">来源链</option></select>
+            </div>
+            <div>
+                <label class="block text-[9px] font-bold text-gray-400 mb-1 uppercase">To</label>
+                <select id="toFilter" class="filter-select"><option value="">目标链</option></select>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <table class="min-w-full text-xs">
+                <thead class="bg-gray-50 border-b border-gray-100">
+                    <tr class="text-gray-400 uppercase font-bold text-[9px]">
+                        <th class="px-6 py-3 text-left">资产</th>
+                        <th class="px-6 py-3 text-left">来源网络</th>
+                        <th class="px-6 py-3 text-left">目标网络</th>
+                    </tr>
+                </thead>
+                <tbody id="dataTable" class="divide-y divide-gray-50"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let allPaths = [];
+        let chainsDict = {};
+        const CORE_ASSETS = ["BTC", "USDT", "USDC", "ETH"];
+
+        function findArray(data) {
+            if (Array.isArray(data)) return data;
+            for (let k in data) if (Array.isArray(data[k])) return data[k];
+            return [];
+        }
+
+        async function init() {
+            const status = document.getElementById('status');
+            try {
+                const [resC, resP] = await Promise.all([
+                    fetch('https://xflows.wanchain.org/api/v3/supported/chains'),
+                    fetch('https://xflows.wanchain.org/api/v3/supported/pairs')
+                ]);
+
+                const cData = findArray(await resC.json());
+                const pData = findArray(await resP.json());
+
+                cData.forEach(c => {
+                    const id = (c.chainId || c.id || '').toString();
+                    if(id) chainsDict[id] = { 
+                        name: c.chainName || c.name || id, 
+                        logo: c.logo || c.iconUrl || '' 
+                    };
+                });
+
+                allPaths = pData.map(p => {
+                    const fId = (p.fromChainId || '').toString();
+                    const tId = (p.toChainId || '').toString();
+                    const f = chainsDict[fId] || { name: fId, logo: '' };
+                    const t = chainsDict[tId] || { name: tId, logo: '' };
+                    return { 
+                        asset: p.symbol || 'N/A', 
+                        fName: f.name, fLogo: f.logo, 
+                        tName: t.name, tLogo: t.logo,
+                        fId, tId
+                    };
+                });
+
+                updateSummary();
+                fillFilters();
+                render();
+                status.innerText = `${allPaths.length} PAIRS READY`;
+            } catch (e) { status.innerText = "OFFLINE"; }
+        }
+
+        function updateSummary() {
+            const hub = document.getElementById('summaryHub');
+            const colorMap = { 
+                BTC: { text: 'text-orange-500', bg: 'bg-orange-500' }, 
+                USDT: { text: 'text-green-500', bg: 'bg-green-500' }, 
+                USDC: { text: 'text-blue-500', bg: 'bg-blue-500' }, 
+                ETH: { text: 'text-gray-700', bg: 'bg-gray-700' } 
+            };
+            
+            hub.innerHTML = CORE_ASSETS.map(asset => {
+                const routes = allPaths.filter(p => p.asset === asset);
+                // 获取涉及的所有不重复链 ID
+                const uniqueIds = [...new Set(routes.map(r => r.fId).concat(routes.map(r => r.tId)))];
+                
+                return `
+                    <div class="asset-column">
+                        <div class="p-4 border-b border-gray-50 bg-gray-50/30">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="font-black ${colorMap[asset].text} text-xl">${asset}</span>
+                                <span class="text-[9px] bg-white border px-1.5 py-0.5 rounded shadow-sm text-gray-400 font-bold">${uniqueIds.length} CHAINS</span>
+                            </div>
+                            <div class="h-1 w-full bg-gray-100 rounded-full overflow-hidden">
+                                <div class="${colorMap[asset].bg} h-full" style="width: ${Math.min(uniqueIds.length * 5, 100)}%"></div>
+                            </div>
+                        </div>
+                        <div class="chain-list">
+                            ${uniqueIds.sort((a,b) => (chainsDict[a]?.name || '').localeCompare(chainsDict[b]?.name || '')).map(id => `
+                                <div class="chain-item">
+                                    <img src="${chainsDict[id]?.logo}" class="chain-icon-mini" onerror="this.style.opacity='0'">
+                                    <span class="truncate">${chainsDict[id]?.name || id}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function fillFilters() {
+            const fill = (id, key) => {
+                const s = document.getElementById(id);
+                [...new Set(allPaths.map(x => x[key]))].sort().forEach(v => {
+                    const o = document.createElement('option');
+                    o.value = o.text = v;
+                    s.appendChild(o);
+                });
+                s.onchange = render;
+            };
+            fill('assetFilter', 'asset');
+            fill('fromFilter', 'fName');
+            fill('toFilter', 'tName');
+        }
+
+        function render() {
+            const fa = document.getElementById('assetFilter').value;
+            const ff = document.getElementById('fromFilter').value;
+            const ft = document.getElementById('toFilter').value;
+            const filtered = allPaths.filter(p => (!fa || p.asset === fa) && (!ff || p.fName === ff) && (!ft || p.tName === ft));
+
+            document.getElementById('dataTable').innerHTML = filtered.map(p => `
+                <tr class="hover:bg-blue-50/20 transition-colors">
+                    <td class="px-6 py-2.5 font-bold text-blue-600">${p.asset}</td>
+                    <td class="px-6 py-2.5 text-gray-500">
+                        ${p.fLogo ? `<img src="${p.fLogo}" class="chain-icon-mini">` : ''}${p.fName}
+                    </td>
+                    <td class="px-6 py-2.5 text-gray-500">
+                        ${p.tLogo ? `<img src="${p.tLogo}" class="chain-icon-mini">` : ''}${p.tName}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        init();
+    </script>
+</body>
+</html>
