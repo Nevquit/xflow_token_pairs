@@ -17,7 +17,7 @@
 <body class="bg-gray-50 p-4 md:p-8 text-gray-800 antialiased font-sans">
 
     <div class="max-w-7xl mx-auto">
-        
+
         <section class="mb-10">
             <div class="flex justify-between items-end mb-6">
                 <div>
@@ -25,7 +25,7 @@
                 </div>
                 <div id="status" class="text-[10px] font-mono bg-green-50 text-green-600 px-3 py-1 rounded-full border border-green-100 font-bold">LOADING DATA...</div>
             </div>
-            
+
             <div id="summaryHub" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 </div>
         </section>
@@ -64,39 +64,44 @@
         let chainsDict = {};
         const CORE_ASSETS = ["BTC", "USDT", "USDC", "ETH"];
 
-        function findArray(data) {
-            if (Array.isArray(data)) return data;
-            for (let k in data) if (Array.isArray(data[k])) return data[k];
-            return [];
-        }
-
         async function init() {
             const status = document.getElementById('status');
             try {
-                const [resC, resP] = await Promise.all([
-                    fetch('https://xflows.wanchain.org/api/v3/supported/chains'),
-                    fetch('https://xflows.wanchain.org/api/v3/supported/pairs')
-                ]);
+                const response = await fetch('/api/data');
+                const { chainInfo, tokenPairs, tokenInfo, supportedChains } = await response.json();
 
-                const cData = findArray(await resC.json());
-                const pData = findArray(await resP.json());
+                if (Array.isArray(supportedChains)) {
+                    supportedChains.forEach(c => {
+                        if (c && c.chainID) {
+                            chainsDict[c.chainID.toString()] = {
+                                name: c.name || c.chainName,
+                                logo: c.logoUrl || c.logo || ''
+                            };
+                        }
+                    });
+                }
 
-                cData.forEach(c => {
-                    const id = (c.chainId || c.id || '').toString();
-                    if(id) chainsDict[id] = { 
-                        name: c.chainName || c.name || id, 
-                        logo: c.logo || c.iconUrl || '' 
-                    };
-                });
+                const tokenMap = {};
+                if (Array.isArray(tokenInfo)) {
+                  tokenInfo.forEach(info => {
+                    if (info && info.symbol) {
+                      tokenMap[info.name] = info.symbol;
+                    }
+                  });
+                }
 
-                allPaths = pData.map(p => {
-                    const fId = (p.fromChainId || '').toString();
-                    const tId = (p.toChainId || '').toString();
+                allPaths = tokenPairs.map(p => {
+                    const fId = (p.fromChainId || p.fromChainID || '').toString();
+                    const tId = (p.toChainId || p.toChainID || '').toString();
                     const f = chainsDict[fId] || { name: fId, logo: '' };
                     const t = chainsDict[tId] || { name: tId, logo: '' };
-                    return { 
-                        asset: p.symbol || 'N/A', 
-                        fName: f.name, fLogo: f.logo, 
+                    const assetSymbol = p.symbol || 'N/A';
+                    const mappedAsset = tokenMap[assetSymbol] || assetSymbol;
+
+                    return {
+                        asset: mappedAsset,
+                        originalAsset: assetSymbol,
+                        fName: f.name, fLogo: f.logo,
                         tName: t.name, tLogo: t.logo,
                         fId, tId
                     };
@@ -106,23 +111,25 @@
                 fillFilters();
                 render();
                 status.innerText = `${allPaths.length} PAIRS READY`;
-            } catch (e) { status.innerText = "OFFLINE"; }
+            } catch (e) {
+                console.error(e);
+                status.innerText = "OFFLINE";
+            }
         }
 
         function updateSummary() {
             const hub = document.getElementById('summaryHub');
-            const colorMap = { 
-                BTC: { text: 'text-orange-500', bg: 'bg-orange-500' }, 
-                USDT: { text: 'text-green-500', bg: 'bg-green-500' }, 
-                USDC: { text: 'text-blue-500', bg: 'bg-blue-500' }, 
-                ETH: { text: 'text-gray-700', bg: 'bg-gray-700' } 
+            const colorMap = {
+                BTC: { text: 'text-orange-500', bg: 'bg-orange-500' },
+                USDT: { text: 'text-green-500', bg: 'bg-green-500' },
+                USDC: { text: 'text-blue-500', bg: 'bg-blue-500' },
+                ETH: { text: 'text-gray-700', bg: 'bg-gray-700' }
             };
-            
+
             hub.innerHTML = CORE_ASSETS.map(asset => {
                 const routes = allPaths.filter(p => p.asset === asset);
-                // 获取涉及的所有不重复链 ID
                 const uniqueIds = [...new Set(routes.map(r => r.fId).concat(routes.map(r => r.tId)))];
-                
+
                 return `
                     <div class="asset-column">
                         <div class="p-4 border-b border-gray-50 bg-gray-50/30">
@@ -170,7 +177,7 @@
 
             document.getElementById('dataTable').innerHTML = filtered.map(p => `
                 <tr class="hover:bg-blue-50/20 transition-colors">
-                    <td class="px-6 py-2.5 font-bold text-blue-600">${p.asset}</td>
+                    <td class="px-6 py-2.5 font-bold text-blue-600">${p.originalAsset}</td>
                     <td class="px-6 py-2.5 text-gray-500">
                         ${p.fLogo ? `<img src="${p.fLogo}" class="chain-icon-mini">` : ''}${p.fName}
                     </td>
@@ -186,4 +193,3 @@
 </body>
 
 </html>
-
